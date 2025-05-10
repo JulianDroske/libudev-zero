@@ -16,6 +16,7 @@
  */
 
 #include <stdio.h>
+#include <dirent.h>
 #include <unistd.h>
 #include <string.h>
 #include <stdlib.h>
@@ -57,6 +58,7 @@ struct udev_device {
     struct udev_list_entry sysattrs;
     struct udev_device *parent;
     struct udev *udev;
+    int initialized;
     int refcount;
 };
 
@@ -198,9 +200,9 @@ struct udev_device *udev_device_get_parent_with_subsystem_devtype(struct udev_de
     return NULL;
 }
 
-/* XXX NOT IMPLEMENTED */ int udev_device_get_is_initialized(struct udev_device *udev_device)
+int udev_device_get_is_initialized(struct udev_device *udev_device)
 {
-    return 1;
+    return udev_device->initialized;
 }
 
 const char *udev_device_get_action(struct udev_device *udev_device)
@@ -540,6 +542,59 @@ static void set_properties_from_props(struct udev_device *udev_device)
     udev_list_entry_add(&udev_device->properties, "ID_PATH", id, 0);
 }
 
+static void set_initialized_properties_from_runtime(struct udev_device *udev_device)
+{
+    char runtime_path[PATH_MAX];
+    const char *subsystem, *sysname;
+    size_t runtime_subsystem_path_len;
+    DIR *runtime_subsystem_dir;
+    FILE *runtime_file;
+    char line[LINE_MAX];
+    char *pos;
+
+    subsystem = udev_device_get_subsystem(udev_device);
+
+    if (!subsystem) {
+        udev_device->initialized = 1;
+        return;
+    }
+
+    snprintf(runtime_path, sizeof(runtime_path), "%s/%s", UDEVZERO_RUNTIME_PATH, subsystem);
+    runtime_subsystem_dir = opendir(runtime_path);
+    if (!runtime_subsystem_dir) {
+        // there are no external programs to populate devices under this subsystem
+        udev_device->initialized = 1;
+        return;
+    }
+    closedir(runtime_subsystem_dir);
+
+    sysname = udev_device_get_sysname(udev_device);
+    if (!sysname) {
+        return;
+    }
+
+    runtime_subsystem_path_len = strlen(runtime_path);
+    snprintf(runtime_path + runtime_subsystem_path_len, sizeof(runtime_path) - runtime_subsystem_path_len, "%s", sysname);
+    runtime_file = fopen(runtime_path, "r");
+
+    if (!runtime_file) {
+        return;
+    }
+
+    udev_device->initialized = 1;
+    while (fgets(line, sizeof(line), runtime_file)) {
+        line[strlen(line) - 1] = '\0';
+        if ((pos = strchr(line, '='))) {
+            *pos = '\0';
+            udev_list_entry_add(&udev_device->properties, line, pos + 1, 0);
+        } else {
+            continue;
+        }
+    }
+
+    fclose(runtime_file);
+}
+
 struct udev_device *udev_device_new_from_syspath(struct udev *udev, const char *syspath)
 {
     char *subsystem, *driver, *sysname;
@@ -562,6 +617,7 @@ struct udev_device *udev_device_new_from_syspath(struct udev *udev, const char *
     }
 
     udev_device->udev = udev;
+    udev_device->initialized = 0;
     udev_device->refcount = 1;
     udev_device->parent = NULL;
 
@@ -593,6 +649,7 @@ struct udev_device *udev_device_new_from_syspath(struct udev *udev, const char *
 
     set_properties_from_evdev(udev_device);
     set_properties_from_props(udev_device);
+    set_initialized_properties_from_runtime(udev_device);
 
     free(driver);
     free(subsystem);
@@ -657,6 +714,7 @@ struct udev_device *udev_device_new_from_uevent(struct udev *udev, char *buf, si
     }
 
     udev_device->udev = udev;
+    udev_device->initialized = 0;
     udev_device->refcount = 1;
     udev_device->parent = NULL;
 
@@ -712,6 +770,7 @@ struct udev_device *udev_device_new_from_uevent(struct udev *udev, char *buf, si
 
     set_properties_from_props(udev_device);
     set_properties_from_evdev(udev_device);
+    set_initialized_properties_from_runtime(udev_device);
     return udev_device;
 }
 

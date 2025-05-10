@@ -29,6 +29,8 @@
 extern "C" {
 #endif
 
+#define UDEVZERO_RUNTIME_PATH "/dev/udevzero"
+
 #define udev_list_entry_foreach(list_entry, first_entry) \
     for (list_entry = first_entry; list_entry; list_entry = udev_list_entry_get_next(list_entry))
 
