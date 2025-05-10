@@ -32,6 +32,7 @@ struct udev_enumerate {
     struct udev_list_entry property_match;
     struct udev_list_entry sysattr_match;
     struct udev_list_entry sysname_match;
+    int initialized_match;
     struct udev_list_entry devices;
     struct udev *udev;
     int refcount;
@@ -77,9 +78,9 @@ int udev_enumerate_add_match_sysname(struct udev_enumerate *udev_enumerate, cons
     return 0;
 }
 
-/* XXX NOT IMPLEMENTED */ int udev_enumerate_add_match_is_initialized(struct udev_enumerate *udev_enumerate)
+int udev_enumerate_add_match_is_initialized(struct udev_enumerate *udev_enumerate)
 {
-    return 0;
+    return udev_enumerate ? !!(udev_enumerate->initialized_match = 1) : -1;
 }
 
 static int filter_subsystem(struct udev_enumerate *udev_enumerate, struct udev_device *udev_device)
@@ -223,6 +224,15 @@ static int filter_sysattr(struct udev_enumerate *udev_enumerate, struct udev_dev
     return 1;
 }
 
+static int filter_initialized(struct udev_enumerate *udev_enumerate, struct udev_device *udev_device)
+{
+    if (udev_enumerate->initialized_match) {
+        return udev_device_get_is_initialized(udev_device);
+    }
+
+    return 1;
+}
+
 static void add_device(struct udev_enumerate *udev_enumerate, const char *path)
 {
     struct udev_device *udev_device;
@@ -236,7 +246,8 @@ static void add_device(struct udev_enumerate *udev_enumerate, const char *path)
     if (!filter_subsystem(udev_enumerate, udev_device) ||
         !filter_sysname(udev_enumerate, udev_device) ||
         !filter_property(udev_enumerate, udev_device) ||
-        !filter_sysattr(udev_enumerate, udev_device)) {
+        !filter_sysattr(udev_enumerate, udev_device) ||
+        !filter_initialized(udev_enumerate, udev_device)) {
         udev_device_unref(udev_device);
         return;
     }
@@ -330,6 +341,7 @@ struct udev_enumerate *udev_enumerate_new(struct udev *udev)
 
     udev_enumerate->refcount = 1;
     udev_enumerate->udev = udev;
+    udev_enumerate->initialized_match = 0;
 
     udev_list_entry_init(&udev_enumerate->subsystem_nomatch);
     udev_list_entry_init(&udev_enumerate->subsystem_match);
